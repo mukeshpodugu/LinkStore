@@ -1,0 +1,174 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: linkstore-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: linkstore_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d linkstore_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Caching & Rate Limiting
+  redis:
+    image: redis:7-alpine
+    container_name: linkstore-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 3. RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: linkstore-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management dashboard UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 4. Storage Nodes (Node 1 - Node 4)
+  storage-node-1:
+    image: openjdk:21-slim
+    container_name: linkstore-storage-1
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node1
+      - NODE_ID=storage-node-1
+      - SERVER_PORT=8082
+      - STORAGE_DIR=/data/node1
+    volumes:
+      - ./storage-node/target/storage-node-0.0.1-SNAPSHOT.jar:/app/storage-node.jar
+      - storage_node_1_data:/data/node1
+    entrypoint: ["java", "-jar", "/app/storage-node.jar"]
+    depends_on:
+      - rabbitmq
+
+  storage-node-2:
+    image: openjdk:21-slim
+    container_name: linkstore-storage-2
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node2
+      - NODE_ID=storage-node-2
+      - SERVER_PORT=8083
+      - STORAGE_DIR=/data/node2
+    volumes:
+      - ./storage-node/target/storage-node-0.0.1-SNAPSHOT.jar:/app/storage-node.jar
+      - storage_node_2_data:/data/node2
+    entrypoint: ["java", "-jar", "/app/storage-node.jar"]
+    depends_on:
+      - rabbitmq
+
+  storage-node-3:
+    image: openjdk:21-slim
+    container_name: linkstore-storage-3
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node3
+      - NODE_ID=storage-node-3
+      - SERVER_PORT=8084
+      - STORAGE_DIR=/data/node3
+    volumes:
+      - ./storage-node/target/storage-node-0.0.1-SNAPSHOT.jar:/app/storage-node.jar
+      - storage_node_3_data:/data/node3
+    entrypoint: ["java", "-jar", "/app/storage-node.jar"]
+    depends_on:
+      - rabbitmq
+
+  storage-node-4:
+    image: openjdk:21-slim
+    container_name: linkstore-storage-4
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node4
+      - NODE_ID=storage-node-4
+      - SERVER_PORT=8085
+      - STORAGE_DIR=/data/node4
+    volumes:
+      - ./storage-node/target/storage-node-0.0.1-SNAPSHOT.jar:/app/storage-node.jar
+      - storage_node_4_data:/data/node4
+    entrypoint: ["java", "-jar", "/app/storage-node.jar"]
+    depends_on:
+      - rabbitmq
+
+  # 5. Metadata Service
+  metadata-service:
+    image: openjdk:21-slim
+    container_name: linkstore-metadata
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/linkstore_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=postgrespassword
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - STORAGE_NODES_LIST=storage-node-1:8082,storage-node-2:8083,storage-node-3:8084,storage-node-4:8085
+    volumes:
+      - ./metadata-service/target/metadata-service-0.0.1-SNAPSHOT.jar:/app/metadata-service.jar
+    entrypoint: ["java", "-jar", "/app/metadata-service.jar"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 6. API Gateway
+  api-gateway:
+    image: openjdk:21-slim
+    container_name: linkstore-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - METADATA_SERVICE_URL=http://metadata-service:8081
+    volumes:
+      - ./api-gateway/target/api-gateway-0.0.1-SNAPSHOT.jar:/app/api-gateway.jar
+    entrypoint: ["java", "-jar", "/app/api-gateway.jar"]
+    depends_on:
+      - metadata-service
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  storage_node_1_data:
+  storage_node_2_data:
+  storage_node_3_data:
+  storage_node_4_data:

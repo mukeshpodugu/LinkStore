@@ -48,11 +48,11 @@ public class HealthCheckerScheduler {
 
     private String getNodeHealthUrl(String nodeId) {
         switch (nodeId) {
-            case "storage-node-1": return "http://localhost:8082/actuator/health";
-            case "storage-node-2": return "http://localhost:8083/actuator/health";
-            case "storage-node-3": return "http://localhost:8084/actuator/health";
-            case "storage-node-4": return "http://localhost:8085/actuator/health";
-            default: return "http://localhost:8082/actuator/health";
+            case "storage-node-1": return "http://storage-node-1:8082/actuator/health";
+            case "storage-node-2": return "http://storage-node-2:8083/actuator/health";
+            case "storage-node-3": return "http://storage-node-3:8084/actuator/health";
+            case "storage-node-4": return "http://storage-node-4:8085/actuator/health";
+            default: return "http://storage-node-1:8082/actuator/health";
         }
     }
 }
